@@ -1,14 +1,16 @@
 'use client';
-import { useTranslations } from 'next-intl';
+import { useTranslations, useLocale } from 'next-intl';
 import { Link } from '@/i18n/navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
+import { WorldviewWithTranslation } from '@/lib/types';
 
 function cleanTranscript(text: string): string {
   // Bontás sorokra és deduplikáció
@@ -34,12 +36,39 @@ function cleanTranscript(text: string): string {
 
 export default function IntakePage() {
   const t = useTranslations();
+  const locale = useLocale();
   const [text, setText] = useState('');
   const [title, setTitle] = useState('');
   const [author, setAuthor] = useState('');
+  const [worldviewId, setWorldviewId] = useState<string>('');
+  const [worldviews, setWorldviews] = useState<WorldviewWithTranslation[]>([]);
   const [loading, setLoading] = useState(false);
   const [aiAtoms, setAiAtoms] = useState<Array<{en: string, hu: string}>>([]);
   const [message, setMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
+
+  useEffect(() => {
+    async function fetchWorldviews() {
+      const { data } = await supabase
+        .from('worldviews')
+        .select(`
+          *,
+          worldview_translations!inner(name, description)
+        `)
+        .eq('worldview_translations.language_code', locale || 'hu')
+        .eq('is_active', true)
+        .order('display_order', { ascending: true });
+
+      if (data) {
+        const transformed = data.map((item: any) => ({
+          ...item,
+          name: item.worldview_translations[0]?.name || item.id,
+          description: item.worldview_translations[0]?.description || null
+        }));
+        setWorldviews(transformed);
+      }
+    }
+    fetchWorldviews();
+  }, [locale]);
 
   async function handleAiAtomize() {
     if (!text.trim()) return;
@@ -50,7 +79,10 @@ export default function IntakePage() {
       const response = await fetch('/api/atomize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text })
+        body: JSON.stringify({ 
+          text,
+          worldview_id: worldviewId || null
+        })
       });
       
       if (!response.ok) throw new Error('AI atomizálás sikertelen');
@@ -59,7 +91,8 @@ export default function IntakePage() {
       setAiAtoms(data.atoms);
       
       const batchInfo = data.batches ? ` (${data.batches} batch)` : '';
-      setMessage({ type: 'success', text: `${data.count} atom elkészült AI által${batchInfo}!` });
+      const worldviewInfo = worldviewId ? ` [${worldviews.find(w => w.id === worldviewId)?.name}]` : '';
+      setMessage({ type: 'success', text: `${data.count} atom elkészült AI által${batchInfo}${worldviewInfo}!` });
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message });
     } finally {
@@ -119,6 +152,8 @@ export default function IntakePage() {
           <Link href="/intake" className="text-sm font-medium">{t('nav.intake')}</Link>
           <Link href="/curation" className="text-sm text-muted-foreground">{t('nav.curation')}</Link>
           <Link href="/examples" className="text-sm text-muted-foreground">💡 Példák</Link>
+          <Link href="/worldviews" className="text-sm text-muted-foreground">🌍 Világnézetek</Link>
+          <Link href="/authors" className="text-sm text-muted-foreground">👤 Szerzők</Link>
         </div>
       </nav>
       <main className="container mx-auto px-4 py-8">
@@ -135,9 +170,25 @@ export default function IntakePage() {
             <Card>
               <CardHeader><CardTitle>Szöveg beillesztése</CardTitle></CardHeader>
               <CardContent className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-3 gap-4">
                   <div><label className="text-sm text-muted-foreground mb-2 block">Forrás címe</label><Input placeholder="pl. The Power of Now" value={title} onChange={(e) => setTitle(e.target.value)} /></div>
                   <div><label className="text-sm text-muted-foreground mb-2 block">Szerző</label><Input placeholder="pl. Eckhart Tolle" value={author} onChange={(e) => setAuthor(e.target.value)} /></div>
+                  <div>
+                    <label className="text-sm text-muted-foreground mb-2 block">Világnézet (opcionális)</label>
+                    <Select value={worldviewId || 'none'} onValueChange={(val) => setWorldviewId(val === 'none' ? '' : val)}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Válassz..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Nincs (általános)</SelectItem>
+                        {worldviews.map((wv) => (
+                          <SelectItem key={wv.id} value={wv.id}>
+                            {wv.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
                 <div><label className="text-sm text-muted-foreground mb-2 block">Tartalom</label><Textarea placeholder="Illeszd be a szöveget ide..." className="min-h-[200px] max-h-[300px] overflow-y-auto" value={text} onChange={(e) => setText(e.target.value)} /></div>
                 <div className="flex justify-between items-center flex-wrap gap-4">

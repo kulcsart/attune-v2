@@ -1,11 +1,39 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { supabase } from '@/lib/supabase';
 
 const GEMINI_API_KEY = process.env.GOOGLE_GEMINI_API_KEY;
 const MAX_CHUNK_SIZE = 28000; // Kis tartalék a 30k limithez képest
 
-async function processChunk(text: string): Promise<Array<{en: string, hu: string}>> {
+async function processChunk(text: string, fewShotExamples: Array<{input_text: string, ideal_output: string}>, worldviewData: any = null): Promise<Array<{en: string, hu: string}>> {
   if (!GEMINI_API_KEY) {
     throw new Error('Gemini API kulcs hiányzik');
+  }
+
+  // Build few-shot section if examples exist
+  let fewShotSection = '';
+  if (fewShotExamples && fewShotExamples.length > 0) {
+    fewShotSection = '\n\nFEW-SHOT PÉLDÁK (tanuld meg ebből a stílust):\n';
+    fewShotExamples.forEach((example) => {
+      fewShotSection += `---\nAI verzió: ${example.input_text}\nJavított verzió: ${example.ideal_output}\n---\n`;
+    });
+  }
+
+  // Build worldview section if data exists
+  let worldviewSection = '';
+  if (worldviewData) {
+    worldviewSection = '\n\nVILÁGNÉZET SZEMPONTOK:\n';
+    
+    if (worldviewData.core_concepts?.length > 0) {
+      worldviewSection += `Alapfogalmak (használd ezeket a kontextusban): ${worldviewData.core_concepts.join(', ')}\n`;
+    }
+    
+    if (worldviewData.typical_phrases?.length > 0) {
+      worldviewSection += `Jellemző kifejezések (használj hasonló stílust): "${worldviewData.typical_phrases.slice(0, 5).join('", "')}"\n`;
+    }
+    
+    if (worldviewData.avoid_terms?.length > 0) {
+      worldviewSection += `KERÜLENDŐ kifejezések: ${worldviewData.avoid_terms.join(', ')}\n`;
+    }
   }
 
   const prompt = `Te egy meditációs tartalom kurátor vagy. A feladatod egy nyers YouTube felirat átalakítása értelmes, önálló gondolatokra (atomokra) KÉTNYELVŰEN: angolul ÉS magyarul.
@@ -25,7 +53,7 @@ KÖTELEZŐ SZABÁLYOK:
 
 PÉLDA KIMENET FORMÁTUM:
 [{"en": "Take a moment to settle into your body and notice your breath.", "hu": "Vegyél egy pillanatot, hogy elhelyezkedj a testedben és vedd észre a légzésedet."}, {"en": "Allow yourself to feel whatever arises without judgment.", "hu": "Engedd meg magadnak, hogy ítélkezés nélkül érezd mindazt, ami felmerül."}]
-
+${fewShotSection}${worldviewSection}
 BEMENET:
 ${text}
 
@@ -81,7 +109,7 @@ FONTOS: Csak a JSON tömböt add vissza objektumokkal (en, hu kulcsokkal), semmi
 
 export async function POST(request: NextRequest) {
   try {
-    const { text } = await request.json();
+    const { text, worldview_id } = await request.json();
     
     if (!text || text.length < 50) {
       return NextResponse.json({ error: 'Túl rövid szöveg' }, { status: 400 });
@@ -89,6 +117,26 @@ export async function POST(request: NextRequest) {
 
     if (!GEMINI_API_KEY) {
       return NextResponse.json({ error: 'Gemini API kulcs hiányzik' }, { status: 500 });
+    }
+
+    // Fetch active few-shot examples once (cached for all chunks)
+    const { data: examples } = await supabase
+      .from('refinery_examples')
+      .select('input_text, ideal_output')
+      .eq('active', true)
+      .limit(10);
+    const fewShotExamples = examples || [];
+
+    // Fetch worldview data if provided
+    let worldviewData: any = null;
+    if (worldview_id) {
+      const { data } = await supabase
+        .from('worldviews')
+        .select('core_concepts, typical_phrases, avoid_terms')
+        .eq('id', worldview_id)
+        .eq('is_active', true)
+        .single();
+      worldviewData = data;
     }
 
     // Batch processing nagyobb szövegeknél
@@ -125,7 +173,7 @@ export async function POST(request: NextRequest) {
       
       for (let i = 0; i < chunks.length; i++) {
         console.log(`Processing chunk ${i + 1}/${chunks.length} (${chunks[i].length} chars)`);
-        const chunkAtoms = await processChunk(chunks[i]);
+        const chunkAtoms = await processChunk(chunks[i], fewShotExamples, worldviewData);
         allAtoms.push(...chunkAtoms);
         
         // Kis késleltetés a rate limiting elkerülésére
@@ -138,7 +186,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Egyszerű feldolgozás rövid szövegeknél
-    const atoms = await processChunk(text.substring(0, MAX_CHUNK_SIZE));
+    const atoms = await processChunk(text.substring(0, MAX_CHUNK_SIZE), fewShotExamples, worldviewData);
     return NextResponse.json({ success: true, atoms, count: atoms.length });
 
   } catch (error: any) {

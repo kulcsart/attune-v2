@@ -1,12 +1,14 @@
 'use client';
-import { useTranslations } from 'next-intl';
+import { useTranslations, useLocale } from 'next-intl';
 import { Link } from '@/i18n/navigation';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { WorldviewWithTranslation } from '@/lib/types';
 
 type Atom = {
   id: string;
@@ -15,18 +17,46 @@ type Atom = {
   status: string;
   source_file: string | null;
   author: string | null;
+  worldview_id: string | null;
   created_at: string;
 };
 
 export default function CurationPage() {
   const t = useTranslations();
+  const locale = useLocale();
   const [atoms, setAtoms] = useState<Atom[]>([]);
+  const [worldviews, setWorldviews] = useState<WorldviewWithTranslation[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string>('pending_review');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState<string>('');
+  const [editWorldviewId, setEditWorldviewId] = useState<string>('');
   const [saveAsExample, setSaveAsExample] = useState<boolean>(false);
+
+  useEffect(() => {
+    async function fetchWorldviews() {
+      const { data } = await supabase
+        .from('worldviews')
+        .select(`
+          *,
+          worldview_translations!inner(name, description)
+        `)
+        .eq('worldview_translations.language_code', locale || 'hu')
+        .eq('is_active', true)
+        .order('display_order', { ascending: true });
+
+      if (data) {
+        const transformed = data.map((item: any) => ({
+          ...item,
+          name: item.worldview_translations[0]?.name || item.id,
+          description: item.worldview_translations[0]?.description || null
+        }));
+        setWorldviews(transformed);
+      }
+    }
+    fetchWorldviews();
+  }, [locale]);
 
   async function fetchAtoms(status: string) {
     setLoading(true);
@@ -60,7 +90,50 @@ export default function CurationPage() {
   function startEdit(atom: Atom) {
     setEditingId(atom.id);
     setEditText(atom.ai_polished_content || atom.original_raw_chunk);
+    
+    // Auto-detect worldview if not set
+    if (!atom.worldview_id) {
+      const detected = detectWorldview(atom.ai_polished_content || atom.original_raw_chunk);
+      setEditWorldviewId(detected || '');
+    } else {
+      setEditWorldviewId(atom.worldview_id);
+    }
+    
     setSaveAsExample(false);
+  }
+
+  function detectWorldview(text: string): string | null {
+    if (!text) return null;
+    const lowerText = text.toLowerCase();
+    
+    // Check each worldview's search keywords
+    for (const wv of worldviews) {
+      if (!wv.search_keywords || wv.search_keywords.length === 0) continue;
+      
+      const matches = wv.search_keywords.filter((keyword: string) => 
+        lowerText.includes(keyword.toLowerCase())
+      );
+      
+      // If at least 2 keywords match, return this worldview
+      if (matches.length >= 2) {
+        return wv.id;
+      }
+    }
+    
+    // Fallback: check typical phrases
+    for (const wv of worldviews) {
+      if (!wv.typical_phrases || wv.typical_phrases.length === 0) continue;
+      
+      const matches = wv.typical_phrases.filter((phrase: string) => 
+        lowerText.includes(phrase.toLowerCase())
+      );
+      
+      if (matches.length >= 1) {
+        return wv.id;
+      }
+    }
+    
+    return null;
   }
 
   async function handleSaveEdit() {
@@ -73,11 +146,20 @@ export default function CurationPage() {
     
     const { error } = await supabase
       .from('content_staging')
-      .update({ ai_polished_content: editText.trim(), updated_at: now })
+      .update({ 
+        ai_polished_content: editText.trim(), 
+        worldview_id: editWorldviewId || null,
+        updated_at: now 
+      })
       .eq('id', editingId);
     
     if (!error) {
-      setAtoms(atoms.map(a => a.id === editingId ? { ...a, ai_polished_content: editText.trim(), updated_at: now } : a));
+      setAtoms(atoms.map(a => a.id === editingId ? { 
+        ...a, 
+        ai_polished_content: editText.trim(), 
+        worldview_id: editWorldviewId || null,
+        updated_at: now 
+      } : a));
       
       // Ha változott és mentés példaként is - csak ha MINDKETTŐ nem üres
       if (hasChanged && saveAsExample && originalText.trim() && editText.trim()) {
@@ -91,6 +173,7 @@ export default function CurationPage() {
       
       setEditingId(null);
       setEditText('');
+      setEditWorldviewId('');
       setSaveAsExample(false);
     }
   }
@@ -98,6 +181,7 @@ export default function CurationPage() {
   function handleCancelEdit() {
     setEditingId(null);
     setEditText('');
+    setEditWorldviewId('');
     setSaveAsExample(false);
   }
 
@@ -148,6 +232,8 @@ export default function CurationPage() {
           <Link href="/intake" className="text-sm text-muted-foreground">{t('nav.intake')}</Link>
           <Link href="/curation" className="text-sm font-medium">{t('nav.curation')}</Link>
           <Link href="/examples" className="text-sm text-muted-foreground">💡 Példák</Link>
+          <Link href="/worldviews" className="text-sm text-muted-foreground">🌍 Világnézetek</Link>
+          <Link href="/authors" className="text-sm text-muted-foreground">👤 Szerzők</Link>
         </div>
       </nav>
       <main className="container mx-auto px-4 py-8">
@@ -202,6 +288,11 @@ export default function CurationPage() {
                               <Badge variant={atom.status === 'approved' ? 'default' : atom.status === 'rejected' ? 'destructive' : 'secondary'} className="text-xs">
                                 {atom.status === 'approved' ? '✓' : atom.status === 'rejected' ? '✗' : '⏳'}
                               </Badge>
+                              {atom.worldview_id && (
+                                <Badge variant="outline" className="text-xs">
+                                  🌍 {worldviews.find(w => w.id === atom.worldview_id)?.name || atom.worldview_id}
+                                </Badge>
+                              )}
                               {atom.source_file && atom.source_file !== 'Untitled' && <span className="text-xs text-muted-foreground">{atom.source_file}</span>}
                               {atom.author && atom.author !== 'Unknown' && <span className="text-xs text-muted-foreground">— {atom.author}</span>}
                               <span className="text-xs text-muted-foreground ml-auto">{new Date(atom.created_at).toLocaleDateString('hu-HU')}</span>
@@ -216,17 +307,35 @@ export default function CurationPage() {
                                   className="w-full min-h-[100px] p-2 text-sm border border-border rounded bg-background resize-y"
                                   placeholder="Szerkeszd a magyar szöveget..."
                                 />
-                                <div className="flex items-center gap-2">
-                                  <input
-                                    type="checkbox"
-                                    id="saveAsExample"
-                                    checked={saveAsExample}
-                                    onChange={(e) => setSaveAsExample(e.target.checked)}
-                                    className="h-4 w-4 cursor-pointer"
-                                  />
-                                  <label htmlFor="saveAsExample" className="text-sm text-muted-foreground cursor-pointer">
-                                    💡 Mentés tanulópéldaként (few-shot learning)
-                                  </label>
+                                <div className="flex items-center gap-4">
+                                  <div className="flex-1">
+                                    <label className="text-xs text-muted-foreground mb-1 block">Világnézet</label>
+                                    <Select value={editWorldviewId || 'none'} onValueChange={(val) => setEditWorldviewId(val === 'none' ? '' : val)}>
+                                      <SelectTrigger className="h-8 text-xs">
+                                        <SelectValue placeholder="Nincs" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="none">Nincs</SelectItem>
+                                        {worldviews.map((wv) => (
+                                          <SelectItem key={wv.id} value={wv.id}>
+                                            {wv.name}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                  <div className="flex items-center gap-2 pt-5">
+                                    <input
+                                      type="checkbox"
+                                      id="saveAsExample"
+                                      checked={saveAsExample}
+                                      onChange={(e) => setSaveAsExample(e.target.checked)}
+                                      className="h-4 w-4 cursor-pointer"
+                                    />
+                                    <label htmlFor="saveAsExample" className="text-xs text-muted-foreground cursor-pointer">
+                                      💡 Mentés tanulópéldaként
+                                    </label>
+                                  </div>
                                 </div>
                                 <div className="flex gap-2">
                                   <Button size="sm" variant="default" onClick={handleSaveEdit}>💾 Mentés</Button>

@@ -56,6 +56,8 @@ export default function DashboardPage() {
           <Link href="/intake" className="text-sm text-muted-foreground">{t('nav.intake')}</Link>
           <Link href="/curation" className="text-sm text-muted-foreground">{t('nav.curation')}</Link>
           <Link href="/examples" className="text-sm text-muted-foreground">💡 Példák</Link>
+          <Link href="/worldviews" className="text-sm text-muted-foreground">🌍 Világnézetek</Link>
+          <Link href="/authors" className="text-sm text-muted-foreground">👤 Szerzők</Link>
         </div>
       </nav>
       <main className="container mx-auto px-4 py-8">
