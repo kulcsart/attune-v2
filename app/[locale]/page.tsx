@@ -55,6 +55,7 @@ export default function DashboardPage() {
           <Link href="/" className="text-sm font-medium">{t('nav.dashboard')}</Link>
           <Link href="/intake" className="text-sm text-muted-foreground">{t('nav.intake')}</Link>
           <Link href="/curation" className="text-sm text-muted-foreground">{t('nav.curation')}</Link>
+          <Link href="/examples" className="text-sm text-muted-foreground">💡 Példák</Link>
         </div>
       </nav>
       <main className="container mx-auto px-4 py-8">

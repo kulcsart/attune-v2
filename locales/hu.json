@@ -1,1 +1,22 @@
-{"common":{"appName":"ATTUNE"},"nav":{"dashboard":"Áttekintés","intake":"Bevitel","curation":"Kurálás","styles":"Stílusok","worldviews":"Világnézetek"},"dashboard":{"title":"Áttekintés","pendingReview":"Jóváhagyásra vár","approved":"Jóváhagyott","totalAtoms":"Összes atom","recentActivity":"Legutóbbi aktivitás","noActivity":"Még nincs aktivitás."},"languages":{"hu":"Magyar","en":"English"}}
+{
+  "common": {
+    "appName": "ATTUNE"
+  },
+  "nav": {
+    "dashboard": "Áttekintés",
+    "intake": "Bevitel",
+    "curation": "Gardening"
+  },
+  "languages": {
+    "hu": "Magyar",
+    "en": "English"
+  },
+  "dashboard": {
+    "title": "Dashboard",
+    "pendingReview": "Függőben",
+    "approved": "Jóváhagyott",
+    "totalAtoms": "Összes atom",
+    "recentActivity": "Legutóbbi tevékenység",
+    "noActivity": "Nincs megjeleníthető aktivitás."
+  }
+}
