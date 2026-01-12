@@ -121,9 +121,9 @@ export default function DashboardPage() {
           <Link href="/" className="text-sm font-medium">{t('nav.dashboard')}</Link>
           <Link href="/intake" className="text-sm text-muted-foreground">{t('nav.intake')}</Link>
           <Link href="/curation" className="text-sm text-muted-foreground">{t('nav.curation')}</Link>
-          <Link href="/examples" className="text-sm text-muted-foreground">💡 Példák</Link>
-          <Link href="/worldviews" className="text-sm text-muted-foreground">🌍 Világnézetek</Link>
-          <Link href="/authors" className="text-sm text-muted-foreground">👤 Szerzők</Link>
+          <Link href="/examples" className="text-sm text-muted-foreground">{t('nav.examples')}</Link>
+          <Link href="/worldviews" className="text-sm text-muted-foreground">{t('nav.worldviews')}</Link>
+          <Link href="/authors" className="text-sm text-muted-foreground">{t('nav.authors')}</Link>
         </div>
       </nav>
       <main className="container mx-auto px-4 py-8">
@@ -131,13 +131,13 @@ export default function DashboardPage() {
         
         {error && (
           <div className="bg-red-500/10 border border-red-500 text-red-500 p-4 rounded mb-8">
-            Supabase error: {error}
+            {t('dashboard.supabaseError')} {error}
           </div>
         )}
 
         {!error && (
           <div className="bg-green-500/10 border border-green-500 text-green-500 p-4 rounded mb-8">
-            ✅ Supabase kapcsolat OK!
+            {t('dashboard.supabaseOk')}
           </div>
         )}
         
@@ -160,31 +160,31 @@ export default function DashboardPage() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm text-muted-foreground">💡 Few-shot Példák</CardTitle>
+              <CardTitle className="text-sm text-muted-foreground">{t('dashboard.fewShotExamples')}</CardTitle>
             </CardHeader>
             <CardContent>
               <p className="text-3xl font-bold">
-                {loading ? '...' : `${fewShotStats.active} / ${fewShotStats.total}`}
+                {loading ? t('common.loading') : `${fewShotStats.active} / ${fewShotStats.total}`}
               </p>
-              <p className="text-xs text-muted-foreground mt-1">aktív / összes</p>
+              <p className="text-xs text-muted-foreground mt-1">{t('dashboard.activeTotal')}</p>
             </CardContent>
           </Card>
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm text-muted-foreground">🌍 Világnézetek</CardTitle>
+              <CardTitle className="text-sm text-muted-foreground">{t('dashboard.worldviews')}</CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-3xl font-bold">{loading ? '...' : worldviewCount}</p>
-              <p className="text-xs text-muted-foreground mt-1">aktív világnézet</p>
+              <p className="text-3xl font-bold">{loading ? t('common.loading') : worldviewCount}</p>
+              <p className="text-xs text-muted-foreground mt-1">{t('dashboard.activeWorldview')}</p>
             </CardContent>
           </Card>
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm text-muted-foreground">👤 Szerzők</CardTitle>
+              <CardTitle className="text-sm text-muted-foreground">{t('dashboard.authors')}</CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-3xl font-bold">{loading ? '...' : authorCount}</p>
-              <p className="text-xs text-muted-foreground mt-1">aktív szerző</p>
+              <p className="text-3xl font-bold">{loading ? t('common.loading') : authorCount}</p>
+              <p className="text-xs text-muted-foreground mt-1">{t('dashboard.activeAuthor')}</p>
             </CardContent>
           </Card>
         </div>
@@ -192,22 +192,22 @@ export default function DashboardPage() {
         {/* Atoms by Worldview Section */}
         <Card className="mb-8">
           <CardHeader>
-            <CardTitle>Atomok világnézet szerint</CardTitle>
+            <CardTitle>{t('dashboard.atomsByWorldview')}</CardTitle>
           </CardHeader>
           <CardContent>
             {loading ? (
-              <p className="text-muted-foreground">Betöltés...</p>
+              <p className="text-muted-foreground">{t('common.loading')}</p>
             ) : atomsByWorldview.length > 0 ? (
               <div className="space-y-3">
                 {atomsByWorldview.map((item) => (
                   <div key={item.worldview_id} className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
                     <span className="font-medium">{item.name}</span>
-                    <Badge variant="secondary">{item.count} atom</Badge>
+                    <Badge variant="secondary">{item.count} {t('dashboard.atomCount')}</Badge>
                   </div>
                 ))}
               </div>
             ) : (
-              <p className="text-muted-foreground text-sm">Nincs adat</p>
+              <p className="text-muted-foreground text-sm">{t('dashboard.noData')}</p>
             )}
           </CardContent>
         </Card>
@@ -215,7 +215,7 @@ export default function DashboardPage() {
         {/* Export Section */}
         <Card className="mb-8">
           <CardHeader>
-            <CardTitle>📥 Export</CardTitle>
+            <CardTitle>{t('dashboard.export')}</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="flex flex-wrap gap-4">
@@ -224,18 +224,18 @@ export default function DashboardPage() {
                 download
                 className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium transition-colors"
               >
-                📄 JSON Export
+                {t('dashboard.exportJson')}
               </a>
               <a
                 href="/api/export?format=csv"
                 download
                 className="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white font-medium transition-colors"
               >
-                📊 CSV Export
+                {t('dashboard.exportCsv')}
               </a>
             </div>
             <p className="text-sm text-muted-foreground mt-4">
-              Exportáld a jóváhagyott atomokat JSON vagy CSV formátumban.
+              {t('dashboard.exportDescription')}
             </p>
           </CardContent>
         </Card>

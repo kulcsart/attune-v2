@@ -50,43 +50,57 @@ export default function IntakePage() {
 
   useEffect(() => {
     async function fetchWorldviews() {
-      const { data } = await supabase
+      const { data: allWorldviews } = await supabase
         .from('worldviews')
-        .select(`
-          *,
-          worldview_translations!inner(name, description)
-        `)
-        .eq('worldview_translations.language_code', locale || 'hu')
+        .select('*')
         .eq('is_active', true)
         .order('display_order', { ascending: true });
 
-      if (data) {
-        const transformed = data.map((item: any) => ({
-          ...item,
-          name: item.worldview_translations[0]?.name || item.id,
-          description: item.worldview_translations[0]?.description || null
-        }));
-        setWorldviews(transformed);
+      if (allWorldviews) {
+        const worldviewsWithTranslations = await Promise.all(
+          allWorldviews.map(async (wv) => {
+            const { data: translation } = await supabase
+              .from('worldview_translations')
+              .select('name, description')
+              .eq('worldview_id', wv.id)
+              .eq('language_code', locale || 'hu')
+              .single();
+
+            return {
+              ...wv,
+              name: translation?.name || wv.id,
+              description: translation?.description || null
+            };
+          })
+        );
+        setWorldviews(worldviewsWithTranslations);
       }
     }
     
     async function fetchAuthors() {
-      const { data } = await supabase
+      const { data: allAuthors } = await supabase
         .from('authors')
-        .select(`
-          *,
-          author_translations!inner(name)
-        `)
-        .eq('author_translations.language_code', locale || 'hu')
+        .select('*')
         .eq('is_active', true)
         .order('created_at', { ascending: false });
 
-      if (data) {
-        const transformed = data.map((item: any) => ({
-          ...item,
-          name: item.author_translations[0]?.name || 'Unknown'
-        }));
-        setAuthors(transformed);
+      if (allAuthors) {
+        const authorsWithTranslations = await Promise.all(
+          allAuthors.map(async (author) => {
+            const { data: translation } = await supabase
+              .from('author_translations')
+              .select('display_name')
+              .eq('author_id', author.id)
+              .eq('language_code', locale || 'hu')
+              .single();
+
+            return {
+              ...author,
+              name: translation?.display_name || 'Unknown'
+            };
+          })
+        );
+        setAuthors(authorsWithTranslations);
       }
     }
     
@@ -110,7 +124,7 @@ export default function IntakePage() {
         })
       });
       
-      if (!response.ok) throw new Error('AI atomizálás sikertelen');
+      if (!response.ok) throw new Error(t('intake.atomizationFailed'));
       
       const data = await response.json();
       setAiAtoms(data.atoms);
@@ -118,7 +132,7 @@ export default function IntakePage() {
       const batchInfo = data.batches ? ` (${data.batches} batch)` : '';
       const worldviewInfo = worldviewId ? ` [${worldviews.find(w => w.id === worldviewId)?.name}]` : '';
       const authorInfo = authorId ? ` - ${authors.find(a => a.id === authorId)?.name}` : '';
-      setMessage({ type: 'success', text: `${data.count} atom elkészült AI által${batchInfo}${worldviewInfo}${authorInfo}!` });
+      setMessage({ type: 'success', text: `${data.count} ${t('intake.atomsCreated')}${batchInfo}${worldviewInfo}${authorInfo}!` });
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message });
     } finally {
@@ -149,7 +163,7 @@ export default function IntakePage() {
       const { error } = await supabase.from('content_staging').insert(records);
       if (error) throw error;
       
-      setMessage({ type: 'success', text: `${aiAtoms.length} atom sikeresen mentve!` });
+      setMessage({ type: 'success', text: `${aiAtoms.length} ${t('intake.atomsSaved')}` });
       setText(''); setTitle(''); setAuthor(''); setWorldviewId(''); setAuthorId(''); setAiAtoms([]);
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message });
@@ -160,7 +174,7 @@ export default function IntakePage() {
 
   function handleClean() {
     setText(cleanTranscript(text));
-    setMessage({ type: 'info', text: 'Timecode-ok és duplikációk eltávolítva!' });
+    setMessage({ type: 'info', text: t('intake.timecodesRemoved') });
   }
 
   return (
@@ -179,36 +193,36 @@ export default function IntakePage() {
           <Link href="/" className="text-sm text-muted-foreground">{t('nav.dashboard')}</Link>
           <Link href="/intake" className="text-sm font-medium">{t('nav.intake')}</Link>
           <Link href="/curation" className="text-sm text-muted-foreground">{t('nav.curation')}</Link>
-          <Link href="/examples" className="text-sm text-muted-foreground">💡 Példák</Link>
-          <Link href="/worldviews" className="text-sm text-muted-foreground">🌍 Világnézetek</Link>
-          <Link href="/authors" className="text-sm text-muted-foreground">👤 Szerzők</Link>
+          <Link href="/examples" className="text-sm text-muted-foreground">{t('nav.examples')}</Link>
+          <Link href="/worldviews" className="text-sm text-muted-foreground">{t('nav.worldviews')}</Link>
+          <Link href="/authors" className="text-sm text-muted-foreground">{t('nav.authors')}</Link>
         </div>
       </nav>
       <main className="container mx-auto px-4 py-8">
-        <h2 className="text-3xl font-bold mb-8">Tartalom bevitel</h2>
+        <h2 className="text-3xl font-bold mb-8">{t('intake.title')}</h2>
         {message && (
           <div className={`p-4 rounded mb-6 ${message.type === 'success' ? 'bg-green-500/10 border border-green-500 text-green-500' : message.type === 'info' ? 'bg-blue-500/10 border border-blue-500 text-blue-500' : 'bg-red-500/10 border border-red-500 text-red-500'}`}>{message.text}</div>
         )}
         <Tabs defaultValue="text" className="w-full">
           <TabsList className="mb-6">
-            <TabsTrigger value="text">Szöveg</TabsTrigger>
-            <TabsTrigger value="youtube">YouTube útmutató</TabsTrigger>
+            <TabsTrigger value="text">{t('intake.textTab')}</TabsTrigger>
+            <TabsTrigger value="youtube">{t('intake.youtubeTab')}</TabsTrigger>
           </TabsList>
           <TabsContent value="text">
             <Card>
-              <CardHeader><CardTitle>Szöveg beillesztése</CardTitle></CardHeader>
+              <CardHeader><CardTitle>{t('intake.pasteText')}</CardTitle></CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-4 gap-4">
-                  <div><label className="text-sm text-muted-foreground mb-2 block">Forrás címe</label><Input placeholder="pl. The Power of Now" value={title} onChange={(e) => setTitle(e.target.value)} /></div>
-                  <div><label className="text-sm text-muted-foreground mb-2 block">Szerző</label><Input placeholder="pl. Eckhart Tolle" value={author} onChange={(e) => setAuthor(e.target.value)} /></div>
+                  <div><label className="text-sm text-muted-foreground mb-2 block">{t('intake.sourceTitle')}</label><Input placeholder={t('intake.sourceTitlePlaceholder')} value={title} onChange={(e) => setTitle(e.target.value)} /></div>
+                  <div><label className="text-sm text-muted-foreground mb-2 block">{t('intake.author')}</label><Input placeholder={t('intake.authorPlaceholder')} value={author} onChange={(e) => setAuthor(e.target.value)} /></div>
                   <div>
-                    <label className="text-sm text-muted-foreground mb-2 block">Világnézet (opcionális)</label>
+                    <label className="text-sm text-muted-foreground mb-2 block">{t('intake.worldview')}</label>
                     <Select value={worldviewId || 'none'} onValueChange={(val) => setWorldviewId(val === 'none' ? '' : val)}>
                       <SelectTrigger>
-                        <SelectValue placeholder="Válassz..." />
+                        <SelectValue placeholder={t('intake.selectWorldview')} />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="none">Nincs (általános)</SelectItem>
+                        <SelectItem value="none">{t('intake.noneGeneral')}</SelectItem>
                         {worldviews.map((wv) => (
                           <SelectItem key={wv.id} value={wv.id}>
                             {wv.name}
@@ -218,13 +232,13 @@ export default function IntakePage() {
                     </Select>
                   </div>
                   <div>
-                    <label className="text-sm text-muted-foreground mb-2 block">Szerző (választó)</label>
+                    <label className="text-sm text-muted-foreground mb-2 block">{t('intake.authorSelect')}</label>
                     <Select value={authorId || 'none'} onValueChange={(val) => setAuthorId(val === 'none' ? '' : val)}>
                       <SelectTrigger>
-                        <SelectValue placeholder="Válassz..." />
+                        <SelectValue placeholder={t('intake.selectAuthor')} />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="none">Nincs</SelectItem>
+                        <SelectItem value="none">{t('common.none')}</SelectItem>
                         {authors.map((a) => (
                           <SelectItem key={a.id} value={a.id}>
                             {a.name}
@@ -234,20 +248,20 @@ export default function IntakePage() {
                     </Select>
                   </div>
                 </div>
-                <div><label className="text-sm text-muted-foreground mb-2 block">Tartalom</label><Textarea placeholder="Illeszd be a szöveget ide..." className="min-h-[200px] max-h-[300px] overflow-y-auto" value={text} onChange={(e) => setText(e.target.value)} /></div>
+                <div><label className="text-sm text-muted-foreground mb-2 block">{t('intake.content')}</label><Textarea placeholder={t('intake.pasteTextHere')} className="min-h-[200px] max-h-[300px] overflow-y-auto" value={text} onChange={(e) => setText(e.target.value)} /></div>
                 <div className="flex justify-between items-center flex-wrap gap-4">
                   <div className="flex items-center gap-4">
-                    <span className="text-sm text-muted-foreground">{text.length} karakter</span>
-                    {text.includes('-->') && <Button variant="outline" size="sm" onClick={handleClean}>🧹 Timecode tisztítás</Button>}
+                    <span className="text-sm text-muted-foreground">{text.length} {t('intake.characters')}</span>
+                    {text.includes('-->') && <Button variant="outline" size="sm" onClick={handleClean}>🧹 {t('intake.cleanTimecodes')}</Button>}
                   </div>
                   <div className="flex gap-2">
-                    <Button onClick={handleAiAtomize} disabled={loading || !text.trim()} variant="default">{loading ? 'AI dolgozik...' : '🤖 AI Atomizálás'}</Button>
-                    {aiAtoms.length > 0 && <Button onClick={handleSaveAtoms} disabled={loading} variant="secondary">💾 Mentés ({aiAtoms.length})</Button>}
+                    <Button onClick={handleAiAtomize} disabled={loading || !text.trim()} variant="default">{loading ? t('common.loading') : t('intake.atomize')}</Button>
+                    {aiAtoms.length > 0 && <Button onClick={handleSaveAtoms} disabled={loading} variant="secondary">{t('intake.saveToStaging')} ({aiAtoms.length})</Button>}
                   </div>
                 </div>
                 {aiAtoms.length > 0 && (
                   <div className="border-t pt-4 mt-4">
-                    <p className="text-sm text-muted-foreground mb-2">AI Atomok előnézete (első 5):</p>
+                    <p className="text-sm text-muted-foreground mb-2">{t('intake.previewFirst5')}:</p>
                     <div className="space-y-3">
                       {aiAtoms.slice(0, 5).map((atom, i) => (
                         <div key={i} className="bg-muted/50 p-3 rounded border-l-2 border-green-500">
@@ -266,18 +280,18 @@ export default function IntakePage() {
           </TabsContent>
           <TabsContent value="youtube">
             <Card>
-              <CardHeader><CardTitle>YouTube felirat másolása</CardTitle></CardHeader>
+              <CardHeader><CardTitle>{t('intake.youtubeGuide')}</CardTitle></CardHeader>
               <CardContent>
                 <div className="bg-blue-500/10 border border-blue-500 text-blue-400 p-4 rounded text-sm">
                   <ol className="list-decimal list-inside space-y-2">
-                    <li>Nyisd meg a YouTube videót</li>
-                    <li>Kattints a <strong>⋮</strong> (három pont) gombra a videó alatt</li>
-                    <li>Válaszd az <strong>Átirat megnyitása</strong> opciót</li>
-                    <li>Jelöld ki az összes szöveget (Ctrl+A) és másold (Ctrl+C)</li>
-                    <li>Menj a <strong>Szöveg</strong> fülre és illeszd be</li>
-                    <li>Kattints a <strong>🧹 Timecode tisztítás</strong> gombra</li>
-                    <li>Kattints a <strong>🤖 AI Atomizálás</strong> gombra</li>
-                    <li>Ellenőrizd az előnézetet, majd kattints a <strong>💾 Mentés</strong> gombra</li>
+                    <li>{t('intake.youtubeStep1')}</li>
+                    <li>{t('intake.youtubeStep2')}</li>
+                    <li>{t('intake.youtubeStep3')}</li>
+                    <li>{t('intake.youtubeStep4')}</li>
+                    <li>{t('intake.youtubeStep5')}</li>
+                    <li>{t('intake.youtubeStep6')}</li>
+                    <li>{t('intake.youtubeStep7')}</li>
+                    <li>{t('intake.youtubeStep8')}</li>
                   </ol>
                 </div>
               </CardContent>

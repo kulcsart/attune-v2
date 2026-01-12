@@ -19,13 +19,14 @@ export default function WorldviewsPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingWorldview, setEditingWorldview] = useState<WorldviewWithTranslation | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [otherLangTranslation, setOtherLangTranslation] = useState<{ name: string; description: string } | null>(null);
   
-  // Form state - only current locale fields
+  // Form state
   const [formData, setFormData] = useState({
     id: '',
-    name: '',
-    description: '',
+    name_hu: '',
+    name_en: '',
+    description_hu: '',
+    description_en: '',
     core_concepts: '',
     typical_phrases: '',
     avoid_terms: '',
@@ -37,36 +38,27 @@ export default function WorldviewsPage() {
     try {
       setLoading(true);
       
-      // Fetch all worldviews
-      const { data: allWorldviews, error: wvError } = await supabase
+      // Query worldviews with translations
+      const { data, error } = await supabase
         .from('worldviews')
-        .select('*')
+        .select(`
+          *,
+          worldview_translations!inner(name, description)
+        `)
+        .eq('worldview_translations.language_code', locale || 'hu')
         .order('display_order', { ascending: true });
 
-      if (wvError) throw wvError;
-      if (!allWorldviews) return;
-
-      // Fetch translations for current locale
-      const worldviewsWithTranslations = await Promise.all(
-        allWorldviews.map(async (wv) => {
-          const { data: translation } = await supabase
-            .from('worldview_translations')
-            .select('name, description')
-            .eq('worldview_id', wv.id)
-            .eq('language_code', locale || 'hu')
-            .single();
-
-          return {
-            ...wv,
-            name: translation?.name || '',
-            description: translation?.description || ''
-          };
-        })
-      );
-
-      setWorldviews(worldviewsWithTranslations);
-
-
+      if (error) throw error;
+      if (data) {
+        // Transform the data to flatten the translation fields
+        const transformed = data.map((item: any) => ({
+          ...item,
+          name: item.worldview_translations[0]?.name || item.id,
+          description: item.worldview_translations[0]?.description || null,
+          worldview_translations: undefined // Remove nested object
+        }));
+        setWorldviews(transformed);
+      }
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -96,11 +88,12 @@ export default function WorldviewsPage() {
 
   function openCreateDialog() {
     setEditingWorldview(null);
-    setOtherLangTranslation(null);
     setFormData({
       id: '',
-      name: '',
-      description: '',
+      name_hu: '',
+      name_en: '',
+      description_hu: '',
+      description_en: '',
       core_concepts: '',
       typical_phrases: '',
       avoid_terms: '',
@@ -110,12 +103,14 @@ export default function WorldviewsPage() {
     setIsDialogOpen(true);
   }
 
-  async function openEditDialog(worldview: WorldviewWithTranslation) {
+  function openEditDialog(worldview: WorldviewWithTranslation) {
     setEditingWorldview(worldview);
     setFormData({
       id: worldview.id,
-      name: worldview.name || '',
-      description: worldview.description || '',
+      name_hu: worldview.name || '',
+      name_en: '', // We need to fetch EN translation
+      description_hu: worldview.description || '',
+      description_en: '', // We need to fetch EN translation
       core_concepts: Array.isArray(worldview.core_concepts) ? worldview.core_concepts.join('\n') : '',
       typical_phrases: Array.isArray(worldview.typical_phrases) ? worldview.typical_phrases.join('\n') : '',
       avoid_terms: Array.isArray(worldview.avoid_terms) ? worldview.avoid_terms.join('\n') : '',
@@ -123,16 +118,23 @@ export default function WorldviewsPage() {
       is_active: worldview.is_active
     });
     
-    // Fetch other language translation status
-    const otherLang = locale === 'hu' ? 'en' : 'hu';
-    const { data } = await supabase
+    // Fetch EN translation
+    supabase
       .from('worldview_translations')
       .select('name, description')
       .eq('worldview_id', worldview.id)
-      .eq('language_code', otherLang)
-      .single();
+      .eq('language_code', 'en')
+      .single()
+      .then(({ data }) => {
+        if (data) {
+          setFormData(prev => ({
+            ...prev,
+            name_en: data.name || '',
+            description_en: data.description || ''
+          }));
+        }
+      });
     
-    setOtherLangTranslation(data || null);
     setIsDialogOpen(true);
   }
 
@@ -143,7 +145,7 @@ export default function WorldviewsPage() {
       const avoidTermsArray = formData.avoid_terms.split('\n').filter(x => x.trim());
 
       if (editingWorldview) {
-        // Update existing worldview base data
+        // Update existing
         const { error: wvError } = await supabase
           .from('worldviews')
           .update({
@@ -157,17 +159,26 @@ export default function WorldviewsPage() {
 
         if (wvError) throw wvError;
 
-        // Update current language translation
-        const { error: translationError } = await supabase
+        // Update HU translation
+        const { error: huError } = await supabase
           .from('worldview_translations')
-          .update({ name: formData.name, description: formData.description })
+          .update({ name: formData.name_hu, description: formData.description_hu })
           .eq('worldview_id', formData.id)
-          .eq('language_code', locale);
+          .eq('language_code', 'hu');
 
-        if (translationError) throw translationError;
+        if (huError) throw huError;
+
+        // Update EN translation
+        const { error: enError } = await supabase
+          .from('worldview_translations')
+          .update({ name: formData.name_en, description: formData.description_en })
+          .eq('worldview_id', formData.id)
+          .eq('language_code', 'en');
+
+        if (enError) throw enError;
 
       } else {
-        // Create new worldview
+        // Create new
         const { error: wvError } = await supabase
           .from('worldviews')
           .insert({
@@ -181,30 +192,29 @@ export default function WorldviewsPage() {
 
         if (wvError) throw wvError;
 
-        // Create current language translation
-        const { error: currentLangError } = await supabase
+        // Create HU translation
+        const { error: huError } = await supabase
           .from('worldview_translations')
           .insert({
             worldview_id: formData.id,
-            language_code: locale,
-            name: formData.name,
-            description: formData.description
+            language_code: 'hu',
+            name: formData.name_hu,
+            description: formData.description_hu
           });
 
-        if (currentLangError) throw currentLangError;
+        if (huError) throw huError;
 
-        // Create empty placeholder for other language
-        const otherLang = locale === 'hu' ? 'en' : 'hu';
-        const { error: otherLangError } = await supabase
+        // Create EN translation
+        const { error: enError } = await supabase
           .from('worldview_translations')
           .insert({
             worldview_id: formData.id,
-            language_code: otherLang,
-            name: '',
-            description: ''
+            language_code: 'en',
+            name: formData.name_en,
+            description: formData.description_en
           });
 
-        if (otherLangError) throw otherLangError;
+        if (enError) throw enError;
       }
 
       setIsDialogOpen(false);
@@ -216,7 +226,7 @@ export default function WorldviewsPage() {
 
   async function handleDelete(id: string) {
     setError(null);
-    if (!confirm(t('worldviews.confirmDelete'))) return;
+    if (!confirm('Biztosan törölni szeretnéd ezt a világnézetet?')) return;
     
     try {
       const { error } = await supabase
@@ -230,9 +240,6 @@ export default function WorldviewsPage() {
       setError(err.message);
     }
   }
-
-  const otherLang = locale === 'hu' ? 'en' : 'hu';
-  const otherLangName = locale === 'hu' ? 'English' : 'Magyar';
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -267,12 +274,12 @@ export default function WorldviewsPage() {
         )}
         <div className="mb-8 flex items-center justify-between">
           <div>
-            <h2 className="text-3xl font-bold">{t('worldviews.title')}</h2>
+            <h2 className="text-3xl font-bold">🌍 Világnézetek</h2>
             <p className="text-muted-foreground mt-2">
-              {t('worldviews.description')}
+              A rendszer 4 különböző világnézetet támogat a tartalom személyre szabásához.
             </p>
           </div>
-          <Button onClick={openCreateDialog}>{t('worldviews.createNew')}</Button>
+          <Button onClick={openCreateDialog}>+ Új világnézet</Button>
         </div>
 
         {loading ? (
@@ -281,22 +288,12 @@ export default function WorldviewsPage() {
           <Card><CardContent className="py-12 text-center text-muted-foreground">{t('worldviews.noWorldviews')}</CardContent></Card>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {worldviews.map((worldview) => {
-              const hasContent = worldview.name || worldview.description;
-              
-              return (
+            {worldviews.map((worldview) => (
               <Card key={worldview.id} className="relative">
                 <CardHeader>
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
-                      {!hasContent && (
-                        <Badge variant="outline" className="mb-2 text-amber-600 border-amber-600">
-                          ⚠️ {t('common.missingTranslation')}
-                        </Badge>
-                      )}
-                      <CardTitle className="text-2xl mb-2">
-                        {worldview.name || <span className="text-muted-foreground italic">{t('curation.noContentForLocale')}</span>}
-                      </CardTitle>
+                      <CardTitle className="text-2xl mb-2">{worldview.name}</CardTitle>
                       {worldview.description && (
                         <CardDescription className="text-base">
                           {worldview.description}
@@ -309,29 +306,30 @@ export default function WorldviewsPage() {
                         variant="outline"
                         onClick={() => openEditDialog(worldview)}
                       >
-                        {t('worldviews.edit')}
+                        ✏️ Szerkesztés
                       </Button>
                       <Button
                         size="sm"
                         variant={worldview.is_active ? "default" : "outline"}
                         onClick={() => toggleActive(worldview.id, worldview.is_active)}
                       >
-                        {worldview.is_active ? t('worldviews.active') : t('worldviews.inactive')}
+                        {worldview.is_active ? '✓ Aktív' : 'Inaktív'}
                       </Button>
                       <Button
                         size="sm"
                         variant="destructive"
                         onClick={() => handleDelete(worldview.id)}
                       >
-                        {t('worldviews.delete')}
+                        🗑️
                       </Button>
                     </div>
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                  {/* Core Concepts */}
                   {worldview.core_concepts && worldview.core_concepts.length > 0 && (
                     <div>
-                      <h4 className="text-sm font-semibold text-muted-foreground mb-2">{t('worldviews.coreConcepts')}</h4>
+                      <h4 className="text-sm font-semibold text-muted-foreground mb-2">Alapfogalmak</h4>
                       <div className="flex flex-wrap gap-2">
                         {worldview.core_concepts.map((concept: string, idx: number) => (
                           <Badge key={idx} variant="secondary">
@@ -342,9 +340,10 @@ export default function WorldviewsPage() {
                     </div>
                   )}
 
+                  {/* Typical Phrases */}
                   {worldview.typical_phrases && worldview.typical_phrases.length > 0 && (
                     <div>
-                      <h4 className="text-sm font-semibold text-muted-foreground mb-2">{t('worldviews.typicalPhrases')}</h4>
+                      <h4 className="text-sm font-semibold text-muted-foreground mb-2">Jellemző kifejezések</h4>
                       <ul className="space-y-1 text-sm">
                         {worldview.typical_phrases.slice(0, 3).map((phrase: string, idx: number) => (
                           <li key={idx} className="text-muted-foreground italic">
@@ -355,9 +354,10 @@ export default function WorldviewsPage() {
                     </div>
                   )}
 
+                  {/* Avoid Terms */}
                   {worldview.avoid_terms && worldview.avoid_terms.length > 0 && (
                     <div>
-                      <h4 className="text-sm font-semibold text-muted-foreground mb-2">{t('worldviews.avoidTerms')}</h4>
+                      <h4 className="text-sm font-semibold text-muted-foreground mb-2">Kerülendő kifejezések</h4>
                       <div className="flex flex-wrap gap-2">
                         {worldview.avoid_terms.slice(0, 4).map((term: string, idx: number) => (
                           <Badge key={idx} variant="outline" className="text-red-500 border-red-500/50">
@@ -369,30 +369,22 @@ export default function WorldviewsPage() {
                   )}
                 </CardContent>
               </Card>
-              );
-            })}
+            ))}
           </div>
         )}
       </main>
 
       {/* Edit/Create Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
-              {editingWorldview ? t('worldviews.dialog.edit') : t('worldviews.dialog.create')}
+              {editingWorldview ? 'Világnézet szerkesztése' : 'Új világnézet'}
             </DialogTitle>
             <DialogDescription>
-              {editingWorldview && otherLangTranslation && (otherLangTranslation.name || otherLangTranslation.description) && (
-                <span className="text-green-600">
-                  ✓ {otherLangName} {t('worldviews.dialog.translationAvailable')}
-                </span>
-              )}
-              {editingWorldview && (!otherLangTranslation || (!otherLangTranslation.name && !otherLangTranslation.description)) && (
-                <span className="text-amber-600">
-                  ⚠️ {otherLangName} {t('worldviews.dialog.translationMissing')}
-                </span>
-              )}
+              {editingWorldview 
+                ? 'Módosítsd a világnézet adatait mindkét nyelven.' 
+                : 'Hozz létre egy új világnézetet magyar és angol fordítással.'}
             </DialogDescription>
           </DialogHeader>
           
@@ -400,7 +392,7 @@ export default function WorldviewsPage() {
             {/* ID (only for new) */}
             {!editingWorldview && (
               <div className="grid gap-2">
-                <label className="text-sm font-medium">{t('worldviews.dialog.id')}</label>
+                <label className="text-sm font-medium">ID (pl. stoic, buddhist)</label>
                 <Input
                   value={formData.id}
                   onChange={(e) => setFormData({ ...formData, id: e.target.value })}
@@ -409,62 +401,81 @@ export default function WorldviewsPage() {
               </div>
             )}
 
-            {/* Name (current locale only) */}
-            <div className="grid gap-2">
-              <label className="text-sm font-medium">{t('worldviews.dialog.name')}</label>
-              <Input
-                value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              />
+            {/* Names */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <label className="text-sm font-medium">Név (magyar)</label>
+                <Input
+                  value={formData.name_hu}
+                  onChange={(e) => setFormData({ ...formData, name_hu: e.target.value })}
+                />
+              </div>
+              <div className="grid gap-2">
+                <label className="text-sm font-medium">Név (angol)</label>
+                <Input
+                  value={formData.name_en}
+                  onChange={(e) => setFormData({ ...formData, name_en: e.target.value })}
+                />
+              </div>
             </div>
 
-            {/* Description (current locale only) */}
-            <div className="grid gap-2">
-              <label className="text-sm font-medium">{t('worldviews.dialog.description')}</label>
-              <Textarea
-                value={formData.description}
-                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                rows={3}
-              />
+            {/* Descriptions */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <label className="text-sm font-medium">Leírás (magyar)</label>
+                <Textarea
+                  value={formData.description_hu}
+                  onChange={(e) => setFormData({ ...formData, description_hu: e.target.value })}
+                  rows={3}
+                />
+              </div>
+              <div className="grid gap-2">
+                <label className="text-sm font-medium">Leírás (angol)</label>
+                <Textarea
+                  value={formData.description_en}
+                  onChange={(e) => setFormData({ ...formData, description_en: e.target.value })}
+                  rows={3}
+                />
+              </div>
             </div>
 
             {/* Core Concepts */}
             <div className="grid gap-2">
-              <label className="text-sm font-medium">{t('worldviews.dialog.coreConcepts')}</label>
+              <label className="text-sm font-medium">Alapfogalmak (soronként egy)</label>
               <Textarea
                 value={formData.core_concepts}
                 onChange={(e) => setFormData({ ...formData, core_concepts: e.target.value })}
                 rows={4}
-                placeholder={locale === 'hu' ? "neuroplaszticitás\ntudatosság kutatás\nstresszválasz" : "neuroplasticity\nmindfulness research\nstress response"}
+                placeholder="neuroplaszticitás&#10;tudatosság kutatás&#10;stresszválasz"
               />
             </div>
 
             {/* Typical Phrases */}
             <div className="grid gap-2">
-              <label className="text-sm font-medium">{t('worldviews.dialog.typicalPhrases')}</label>
+              <label className="text-sm font-medium">Jellemző kifejezések (soronként egy)</label>
               <Textarea
                 value={formData.typical_phrases}
                 onChange={(e) => setFormData({ ...formData, typical_phrases: e.target.value })}
                 rows={4}
-                placeholder={locale === 'hu' ? "kutatások szerint\naz agy képes\ntudományosan bizonyított" : "research shows\nthe brain is capable\nscientifically proven"}
+                placeholder="kutatások szerint&#10;az agy képes&#10;tudományosan bizonyított"
               />
             </div>
 
             {/* Avoid Terms */}
             <div className="grid gap-2">
-              <label className="text-sm font-medium">{t('worldviews.dialog.avoidTerms')}</label>
+              <label className="text-sm font-medium">Kerülendő kifejezések (soronként egy)</label>
               <Textarea
                 value={formData.avoid_terms}
                 onChange={(e) => setFormData({ ...formData, avoid_terms: e.target.value })}
                 rows={4}
-                placeholder={locale === 'hu' ? "spirituális\nmisztikus\nezoterikus" : "spiritual\nmystical\nesoteric"}
+                placeholder="spirituális&#10;misztikus&#10;ezoterikus"
               />
             </div>
 
             {/* Display Order & Active */}
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
-                <label className="text-sm font-medium">{t('worldviews.dialog.displayOrder')}</label>
+                <label className="text-sm font-medium">Sorrend</label>
                 <Input
                   type="number"
                   value={formData.display_order}
@@ -472,13 +483,13 @@ export default function WorldviewsPage() {
                 />
               </div>
               <div className="grid gap-2">
-                <label className="text-sm font-medium">{t('worldviews.dialog.isActive')}</label>
+                <label className="text-sm font-medium">Aktív</label>
                 <Button
                   type="button"
                   variant={formData.is_active ? "default" : "outline"}
                   onClick={() => setFormData({ ...formData, is_active: !formData.is_active })}
                 >
-                  {formData.is_active ? t('common.active') : t('common.inactive')}
+                  {formData.is_active ? '✓ Aktív' : 'Inaktív'}
                 </Button>
               </div>
             </div>
@@ -486,10 +497,10 @@ export default function WorldviewsPage() {
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
-              {t('worldviews.dialog.cancel')}
+              Mégse
             </Button>
             <Button onClick={handleSave}>
-              {t('worldviews.dialog.save')}
+              {editingWorldview ? 'Mentés' : 'Létrehozás'}
             </Button>
           </DialogFooter>
         </DialogContent>

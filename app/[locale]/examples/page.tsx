@@ -22,6 +22,7 @@ export default function ExamplesPage() {
   const [examples, setExamples] = useState<Example[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string>('all');
+  const [error, setError] = useState<string | null>(null);
 
   function extractText(jsonOrString: string): string {
     if (!jsonOrString) return '';
@@ -34,36 +35,49 @@ export default function ExamplesPage() {
   }
 
   async function fetchExamples() {
-    setLoading(true);
-    let query = supabase.from('refinery_examples').select('*').order('created_at', { ascending: false });
-    
-    if (filter === 'active') query = query.eq('active', true);
-    else if (filter === 'inactive') query = query.eq('active', false);
-    
-    const { data, error } = await query;
-    if (!error && data) setExamples(data);
-    setLoading(false);
+    try {
+      setLoading(true);
+      let query = supabase.from('refinery_examples').select('*').order('created_at', { ascending: false });
+      
+      if (filter === 'active') query = query.eq('active', true);
+      else if (filter === 'inactive') query = query.eq('active', false);
+      
+      const { data, error } = await query;
+      if (error) throw error;
+      if (data) setExamples(data);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => { fetchExamples(); }, [filter]);
 
   async function toggleActive(id: string, currentActive: boolean) {
-    const { error } = await supabase
-      .from('refinery_examples')
-      .update({ active: !currentActive })
-      .eq('id', id);
-    
-    if (!error) {
+    try {
+      const { error } = await supabase
+        .from('refinery_examples')
+        .update({ active: !currentActive })
+        .eq('id', id);
+      
+      if (error) throw error;
       setExamples(examples.map(ex => ex.id === id ? { ...ex, active: !currentActive } : ex));
+    } catch (err: any) {
+      setError(err.message);
     }
   }
 
   async function deleteExample(id: string) {
+    setError(null);
     if (!confirm('Biztosan törölni szeretnéd ezt a példát?')) return;
     
-    const { error } = await supabase.from('refinery_examples').delete().eq('id', id);
-    if (!error) {
+    try {
+      const { error } = await supabase.from('refinery_examples').delete().eq('id', id);
+      if (error) throw error;
       setExamples(examples.filter(ex => ex.id !== id));
+    } catch (err: any) {
+      setError(err.message);
     }
   }
 
@@ -86,41 +100,46 @@ export default function ExamplesPage() {
           <Link href="/" className="text-sm text-muted-foreground">{t('nav.dashboard')}</Link>
           <Link href="/intake" className="text-sm text-muted-foreground">{t('nav.intake')}</Link>
           <Link href="/curation" className="text-sm text-muted-foreground">{t('nav.curation')}</Link>
-          <Link href="/examples" className="text-sm font-medium">💡 Few-Shot Példák</Link>
-          <Link href="/worldviews" className="text-sm text-muted-foreground">🌍 Világnézetek</Link>
-          <Link href="/authors" className="text-sm text-muted-foreground">👤 Szerzők</Link>
+          <Link href="/examples" className="text-sm font-medium">{t('nav.examples')}</Link>
+          <Link href="/worldviews" className="text-sm text-muted-foreground">{t('nav.worldviews')}</Link>
+          <Link href="/authors" className="text-sm text-muted-foreground">{t('nav.authors')}</Link>
         </div>
       </nav>
       <main className="container mx-auto px-4 py-8">
+        {error && (
+          <div className="bg-red-500/10 border border-red-500 text-red-500 p-4 rounded mb-4">
+            ❌ {error}
+          </div>
+        )}
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h2 className="text-3xl font-bold">💡 Few-Shot Learning Példák</h2>
+            <h2 className="text-3xl font-bold">{t('examples.title')}</h2>
             <p className="text-muted-foreground mt-2">
-              Válaszd ki a legjobb javításokat, amiből az AI tanulhat. Max 10-15 aktív példa ajánlott.
+              {t('examples.description')}
             </p>
           </div>
           <div className="text-right">
             <div className="text-2xl font-bold">{activeCount} / {totalCount}</div>
-            <div className="text-sm text-muted-foreground">aktív példa</div>
+            <div className="text-sm text-muted-foreground">{t('dashboard.activeTotal')}</div>
             {activeCount > 15 && (
-              <Badge variant="destructive" className="mt-2">⚠️ Túl sok aktív</Badge>
+              <Badge variant="destructive" className="mt-2">⚠️ {t('examples.tooManyActive')}</Badge>
             )}
           </div>
         </div>
 
         <Tabs value={filter} onValueChange={setFilter} className="w-full">
           <TabsList className="mb-6">
-            <TabsTrigger value="all">Összes ({totalCount})</TabsTrigger>
-            <TabsTrigger value="active">Aktív ({activeCount})</TabsTrigger>
-            <TabsTrigger value="inactive">Inaktív ({totalCount - activeCount})</TabsTrigger>
+            <TabsTrigger value="all">{t('examples.all')} ({totalCount})</TabsTrigger>
+            <TabsTrigger value="active">{t('examples.active')} ({activeCount})</TabsTrigger>
+            <TabsTrigger value="inactive">{t('examples.inactive')} ({totalCount - activeCount})</TabsTrigger>
           </TabsList>
 
           {['all', 'active', 'inactive'].map(tab => (
             <TabsContent key={tab} value={tab}>
               {loading ? (
-                <p className="text-muted-foreground">Betöltés...</p>
+                <p className="text-muted-foreground">{t('common.loading')}</p>
               ) : examples.length === 0 ? (
-                <Card><CardContent className="py-8 text-center text-muted-foreground">Nincs megjeleníthető példa.</CardContent></Card>
+                <Card><CardContent className="py-8 text-center text-muted-foreground">{t('examples.noExamples')}</CardContent></Card>
               ) : (
                 <div className="space-y-4">
                   {examples.map((example) => (
@@ -130,7 +149,7 @@ export default function ExamplesPage() {
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 mb-3">
                               <Badge variant={example.active ? 'default' : 'secondary'}>
-                                {example.active ? '✓ Aktív' : '○ Inaktív'}
+                              {example.active ? `✓ ${t('examples.active')}` : `○ ${t('examples.inactive')}`}
                               </Badge>
                               <span className="text-xs text-muted-foreground">
                                 {new Date(example.created_at).toLocaleDateString('hu-HU', { 
@@ -144,19 +163,19 @@ export default function ExamplesPage() {
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                               <div className="space-y-2">
                                 <div className="flex items-center gap-2">
-                                  <span className="text-xs font-semibold text-muted-foreground">🤖 AI VERZIÓ</span>
+                                  <span className="text-xs font-semibold text-muted-foreground">{t('examples.aiVersion')}</span>
                                 </div>
                                 <div className="bg-red-500/10 border border-red-500/30 rounded p-3 text-sm whitespace-pre-wrap">
-                                  {extractText(example.input_text) || <span className="text-muted-foreground italic">Nincs szöveg</span>}
+                                  {extractText(example.input_text) || <span className="text-muted-foreground italic">{t('common.noText')}</span>}
                                 </div>
                               </div>
                               
                               <div className="space-y-2">
                                 <div className="flex items-center gap-2">
-                                  <span className="text-xs font-semibold text-muted-foreground">👤 EMBERI JAVÍTÁS</span>
+                                  <span className="text-xs font-semibold text-muted-foreground">{t('examples.humanCorrection')}</span>
                                 </div>
                                 <div className="bg-green-500/10 border border-green-500/30 rounded p-3 text-sm whitespace-pre-wrap">
-                                  {extractText(example.ideal_output) || <span className="text-muted-foreground italic">Nincs szöveg</span>}
+                                  {extractText(example.ideal_output) || <span className="text-muted-foreground italic">{t('common.noText')}</span>}
                                 </div>
                               </div>
                             </div>
