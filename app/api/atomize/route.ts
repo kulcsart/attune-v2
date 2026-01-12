@@ -4,7 +4,12 @@ import { supabase } from '@/lib/supabase';
 const GEMINI_API_KEY = process.env.GOOGLE_GEMINI_API_KEY;
 const MAX_CHUNK_SIZE = 28000; // Kis tartalék a 30k limithez képest
 
-async function processChunk(text: string, fewShotExamples: Array<{input_text: string, ideal_output: string}>, worldviewData: any = null): Promise<Array<{en: string, hu: string}>> {
+async function processChunk(
+  text: string, 
+  fewShotExamples: Array<{input_text: string, ideal_output: string}>, 
+  worldviewData: any = null,
+  authorData: any = null
+): Promise<Array<{en: string, hu: string}>> {
   if (!GEMINI_API_KEY) {
     throw new Error('Gemini API kulcs hiányzik');
   }
@@ -36,6 +41,23 @@ async function processChunk(text: string, fewShotExamples: Array<{input_text: st
     }
   }
 
+  // Build author section if data exists
+  let authorSection = '';
+  if (authorData) {
+    authorSection = '\n\nSZERZŐI SZEMPONTOK:\n';
+    
+    if (authorData.signature_concepts?.length > 0) {
+      authorSection += `Szerző jellegzetes fogalmai: ${authorData.signature_concepts.join(', ')}\n`;
+    }
+    
+    if (authorData.debranding_map && Object.keys(authorData.debranding_map).length > 0) {
+      authorSection += 'Márkanélküli formázás: Cseréld le az alábbi szerzői márkákat általános kifejezésekre:\n';
+      Object.entries(authorData.debranding_map).forEach(([brand, generic]: [string, any]) => {
+        authorSection += `  "${brand}" → "${generic}"\n`;
+      });
+    }
+  }
+
   const prompt = `Te egy meditációs tartalom kurátor vagy. A feladatod egy nyers YouTube felirat átalakítása értelmes, önálló gondolatokra (atomokra) KÉTNYELVŰEN: angolul ÉS magyarul.
 
 FONTOS: A bemenet YouTube felirat formátum, ami tele van ismétlésekkel, duplikációkkal és töredékes mondatokkal. A te feladatod tiszta, befejezett gondolatokat készíteni belőle.
@@ -53,7 +75,7 @@ KÖTELEZŐ SZABÁLYOK:
 
 PÉLDA KIMENET FORMÁTUM:
 [{"en": "Take a moment to settle into your body and notice your breath.", "hu": "Vegyél egy pillanatot, hogy elhelyezkedj a testedben és vedd észre a légzésedet."}, {"en": "Allow yourself to feel whatever arises without judgment.", "hu": "Engedd meg magadnak, hogy ítélkezés nélkül érezd mindazt, ami felmerül."}]
-${fewShotSection}${worldviewSection}
+${fewShotSection}${worldviewSection}${authorSection}
 BEMENET:
 ${text}
 
@@ -104,12 +126,28 @@ FONTOS: Csak a JSON tömböt add vissza objektumokkal (en, hu kulcsokkal), semmi
     return { en: cleanedEn, hu: cleanedHu };
   });
   
+  // Apply debranding if author data with debranding_map exists
+  if (authorData?.debranding_map && Object.keys(authorData.debranding_map).length > 0) {
+    atoms = atoms.map(atom => {
+      let debrandedEn = atom.en;
+      let debrandedHu = atom.hu;
+      
+      Object.entries(authorData.debranding_map).forEach(([brand, generic]: [string, any]) => {
+        const brandRegex = new RegExp(brand, 'gi');
+        debrandedEn = debrandedEn.replace(brandRegex, generic);
+        debrandedHu = debrandedHu.replace(brandRegex, generic);
+      });
+      
+      return { en: debrandedEn, hu: debrandedHu };
+    });
+  }
+  
   return atoms;
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const { text, worldview_id } = await request.json();
+    const { text, worldview_id, author_id } = await request.json();
     
     if (!text || text.length < 50) {
       return NextResponse.json({ error: 'Túl rövid szöveg' }, { status: 400 });
@@ -137,6 +175,18 @@ export async function POST(request: NextRequest) {
         .eq('is_active', true)
         .single();
       worldviewData = data;
+    }
+
+    // Fetch author data if provided
+    let authorData: any = null;
+    if (author_id) {
+      const { data } = await supabase
+        .from('authors')
+        .select('signature_concepts, debranding_map')
+        .eq('id', author_id)
+        .eq('is_active', true)
+        .single();
+      authorData = data;
     }
 
     // Batch processing nagyobb szövegeknél
@@ -173,7 +223,7 @@ export async function POST(request: NextRequest) {
       
       for (let i = 0; i < chunks.length; i++) {
         console.log(`Processing chunk ${i + 1}/${chunks.length} (${chunks[i].length} chars)`);
-        const chunkAtoms = await processChunk(chunks[i], fewShotExamples, worldviewData);
+        const chunkAtoms = await processChunk(chunks[i], fewShotExamples, worldviewData, authorData);
         allAtoms.push(...chunkAtoms);
         
         // Kis késleltetés a rate limiting elkerülésére
@@ -186,7 +236,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Egyszerű feldolgozás rövid szövegeknél
-    const atoms = await processChunk(text.substring(0, MAX_CHUNK_SIZE), fewShotExamples, worldviewData);
+    const atoms = await processChunk(text.substring(0, MAX_CHUNK_SIZE), fewShotExamples, worldviewData, authorData);
     return NextResponse.json({ success: true, atoms, count: atoms.length });
 
   } catch (error: any) {

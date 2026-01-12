@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
-import { WorldviewWithTranslation } from '@/lib/types';
+import { WorldviewWithTranslation, AuthorWithTranslation } from '@/lib/types';
 
 function cleanTranscript(text: string): string {
   // Bontás sorokra és deduplikáció
@@ -41,7 +41,9 @@ export default function IntakePage() {
   const [title, setTitle] = useState('');
   const [author, setAuthor] = useState('');
   const [worldviewId, setWorldviewId] = useState<string>('');
+  const [authorId, setAuthorId] = useState<string>('');
   const [worldviews, setWorldviews] = useState<WorldviewWithTranslation[]>([]);
+  const [authors, setAuthors] = useState<AuthorWithTranslation[]>([]);
   const [loading, setLoading] = useState(false);
   const [aiAtoms, setAiAtoms] = useState<Array<{en: string, hu: string}>>([]);
   const [message, setMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
@@ -67,7 +69,29 @@ export default function IntakePage() {
         setWorldviews(transformed);
       }
     }
+    
+    async function fetchAuthors() {
+      const { data } = await supabase
+        .from('authors')
+        .select(`
+          *,
+          author_translations!inner(name)
+        `)
+        .eq('author_translations.language_code', locale || 'hu')
+        .eq('is_active', true)
+        .order('created_at', { ascending: false });
+
+      if (data) {
+        const transformed = data.map((item: any) => ({
+          ...item,
+          name: item.author_translations[0]?.name || 'Unknown'
+        }));
+        setAuthors(transformed);
+      }
+    }
+    
     fetchWorldviews();
+    fetchAuthors();
   }, [locale]);
 
   async function handleAiAtomize() {
@@ -81,7 +105,8 @@ export default function IntakePage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           text,
-          worldview_id: worldviewId || null
+          worldview_id: worldviewId || null,
+          author_id: authorId || null
         })
       });
       
@@ -92,7 +117,8 @@ export default function IntakePage() {
       
       const batchInfo = data.batches ? ` (${data.batches} batch)` : '';
       const worldviewInfo = worldviewId ? ` [${worldviews.find(w => w.id === worldviewId)?.name}]` : '';
-      setMessage({ type: 'success', text: `${data.count} atom elkészült AI által${batchInfo}${worldviewInfo}!` });
+      const authorInfo = authorId ? ` - ${authors.find(a => a.id === authorId)?.name}` : '';
+      setMessage({ type: 'success', text: `${data.count} atom elkészült AI által${batchInfo}${worldviewInfo}${authorInfo}!` });
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message });
     } finally {
@@ -113,6 +139,8 @@ export default function IntakePage() {
         ai_polished_content: atom.hu,
         source_file: title || 'Untitled',
         author: author || 'Unknown',
+        worldview_id: worldviewId || null,
+        author_id: authorId || null,
         status: 'pending_review',
         created_at: now,
         updated_at: now
@@ -122,7 +150,7 @@ export default function IntakePage() {
       if (error) throw error;
       
       setMessage({ type: 'success', text: `${aiAtoms.length} atom sikeresen mentve!` });
-      setText(''); setTitle(''); setAuthor(''); setAiAtoms([]);
+      setText(''); setTitle(''); setAuthor(''); setWorldviewId(''); setAuthorId(''); setAiAtoms([]);
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message });
     } finally {
@@ -170,7 +198,7 @@ export default function IntakePage() {
             <Card>
               <CardHeader><CardTitle>Szöveg beillesztése</CardTitle></CardHeader>
               <CardContent className="space-y-4">
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-4 gap-4">
                   <div><label className="text-sm text-muted-foreground mb-2 block">Forrás címe</label><Input placeholder="pl. The Power of Now" value={title} onChange={(e) => setTitle(e.target.value)} /></div>
                   <div><label className="text-sm text-muted-foreground mb-2 block">Szerző</label><Input placeholder="pl. Eckhart Tolle" value={author} onChange={(e) => setAuthor(e.target.value)} /></div>
                   <div>
@@ -184,6 +212,22 @@ export default function IntakePage() {
                         {worldviews.map((wv) => (
                           <SelectItem key={wv.id} value={wv.id}>
                             {wv.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <label className="text-sm text-muted-foreground mb-2 block">Szerző (választó)</label>
+                    <Select value={authorId || 'none'} onValueChange={(val) => setAuthorId(val === 'none' ? '' : val)}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Válassz..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Nincs</SelectItem>
+                        {authors.map((a) => (
+                          <SelectItem key={a.id} value={a.id}>
+                            {a.name}
                           </SelectItem>
                         ))}
                       </SelectContent>

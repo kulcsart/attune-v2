@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import { WorldviewWithTranslation } from '@/lib/types';
+import { WorldviewWithTranslation, AuthorWithTranslation } from '@/lib/types';
 
 type Atom = {
   id: string;
@@ -18,6 +18,7 @@ type Atom = {
   source_file: string | null;
   author: string | null;
   worldview_id: string | null;
+  author_id: string | null;
   created_at: string;
 };
 
@@ -26,12 +27,14 @@ export default function CurationPage() {
   const locale = useLocale();
   const [atoms, setAtoms] = useState<Atom[]>([]);
   const [worldviews, setWorldviews] = useState<WorldviewWithTranslation[]>([]);
+  const [authors, setAuthors] = useState<AuthorWithTranslation[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string>('pending_review');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState<string>('');
   const [editWorldviewId, setEditWorldviewId] = useState<string>('');
+  const [editAuthorId, setEditAuthorId] = useState<string>('');
   const [saveAsExample, setSaveAsExample] = useState<boolean>(false);
 
   useEffect(() => {
@@ -55,7 +58,29 @@ export default function CurationPage() {
         setWorldviews(transformed);
       }
     }
+    
+    async function fetchAuthors() {
+      const { data } = await supabase
+        .from('authors')
+        .select(`
+          *,
+          author_translations!inner(name)
+        `)
+        .eq('author_translations.language_code', locale || 'hu')
+        .eq('is_active', true)
+        .order('created_at', { ascending: false });
+
+      if (data) {
+        const transformed = data.map((item: any) => ({
+          ...item,
+          name: item.author_translations[0]?.name || 'Unknown'
+        }));
+        setAuthors(transformed);
+      }
+    }
+    
     fetchWorldviews();
+    fetchAuthors();
   }, [locale]);
 
   async function fetchAtoms(status: string) {
@@ -99,6 +124,7 @@ export default function CurationPage() {
       setEditWorldviewId(atom.worldview_id);
     }
     
+    setEditAuthorId(atom.author_id || '');
     setSaveAsExample(false);
   }
 
@@ -149,6 +175,7 @@ export default function CurationPage() {
       .update({ 
         ai_polished_content: editText.trim(), 
         worldview_id: editWorldviewId || null,
+        author_id: editAuthorId || null,
         updated_at: now 
       })
       .eq('id', editingId);
@@ -158,6 +185,7 @@ export default function CurationPage() {
         ...a, 
         ai_polished_content: editText.trim(), 
         worldview_id: editWorldviewId || null,
+        author_id: editAuthorId || null,
         updated_at: now 
       } : a));
       
@@ -182,6 +210,7 @@ export default function CurationPage() {
     setEditingId(null);
     setEditText('');
     setEditWorldviewId('');
+    setEditAuthorId('');
     setSaveAsExample(false);
   }
 
@@ -293,6 +322,11 @@ export default function CurationPage() {
                                   🌍 {worldviews.find(w => w.id === atom.worldview_id)?.name || atom.worldview_id}
                                 </Badge>
                               )}
+                              {atom.author_id && (
+                                <Badge variant="outline" className="text-xs">
+                                  👤 {authors.find(a => a.id === atom.author_id)?.name || 'Szerző'}
+                                </Badge>
+                              )}
                               {atom.source_file && atom.source_file !== 'Untitled' && <span className="text-xs text-muted-foreground">{atom.source_file}</span>}
                               {atom.author && atom.author !== 'Unknown' && <span className="text-xs text-muted-foreground">— {atom.author}</span>}
                               <span className="text-xs text-muted-foreground ml-auto">{new Date(atom.created_at).toLocaleDateString('hu-HU')}</span>
@@ -319,6 +353,22 @@ export default function CurationPage() {
                                         {worldviews.map((wv) => (
                                           <SelectItem key={wv.id} value={wv.id}>
                                             {wv.name}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                  <div className="flex-1">
+                                    <label className="text-xs text-muted-foreground mb-1 block">Szerző</label>
+                                    <Select value={editAuthorId || 'none'} onValueChange={(val) => setEditAuthorId(val === 'none' ? '' : val)}>
+                                      <SelectTrigger className="h-8 text-xs">
+                                        <SelectValue placeholder="Nincs" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="none">Nincs</SelectItem>
+                                        {authors.map((author) => (
+                                          <SelectItem key={author.id} value={author.id}>
+                                            {author.name}
                                           </SelectItem>
                                         ))}
                                       </SelectContent>
