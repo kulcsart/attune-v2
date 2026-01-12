@@ -36,7 +36,7 @@ export interface Author {
   primary_worldview_id: WorldviewId | null;
   secondary_worldviews: WorldviewId[];
   signature_concepts: string[];
-  debranding_map: Record<string, string>;
+  debranding_map?: Record<string, string>; // Opcionális
   is_active: boolean;
   created_at: string;
   updated_at: string;

@@ -9,13 +9,17 @@ import { supabase } from '@/lib/supabase';
 export default function DashboardPage() {
   const t = useTranslations();
   const [stats, setStats] = useState({ pending: 0, approved: 0, total: 0 });
+  const [fewShotStats, setFewShotStats] = useState({ active: 0, total: 0 });
+  const [worldviewCount, setWorldviewCount] = useState(0);
+  const [authorCount, setAuthorCount] = useState(0);
+  const [atomsByWorldview, setAtomsByWorldview] = useState<{ worldview_id: string; count: number; name?: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     async function fetchStats() {
       try {
-        // Test connection by fetching from content_staging
+        // Content staging stats
         const { data, error, count } = await supabase
           .from('content_staging')
           .select('status', { count: 'exact' });
@@ -26,6 +30,68 @@ export default function DashboardPage() {
         const approved = data?.filter(d => d.status === 'approved').length || 0;
         
         setStats({ pending, approved, total: count || 0 });
+
+        // Few-shot examples stats
+        const { count: totalExamples } = await supabase
+          .from('refinery_examples')
+          .select('*', { count: 'exact', head: true });
+
+        const { count: activeExamples } = await supabase
+          .from('refinery_examples')
+          .select('*', { count: 'exact', head: true })
+          .eq('active', true);
+
+        setFewShotStats({ 
+          active: activeExamples || 0, 
+          total: totalExamples || 0 
+        });
+
+        // Active worldviews count
+        const { count: worldviews } = await supabase
+          .from('worldviews')
+          .select('*', { count: 'exact', head: true })
+          .eq('is_active', true);
+
+        setWorldviewCount(worldviews || 0);
+
+        // Active authors count
+        const { count: authors } = await supabase
+          .from('authors')
+          .select('*', { count: 'exact', head: true })
+          .eq('is_active', true);
+
+        setAuthorCount(authors || 0);
+
+        // Atoms grouped by worldview
+        const { data: worldviewData } = await supabase
+          .from('content_staging')
+          .select('worldview_id');
+
+        if (worldviewData) {
+          const grouped = worldviewData.reduce((acc: any, item) => {
+            if (item.worldview_id) {
+              acc[item.worldview_id] = (acc[item.worldview_id] || 0) + 1;
+            }
+            return acc;
+          }, {});
+
+          // Get worldview names from translations table
+          const { data: worldviews } = await supabase
+            .from('worldview_translations')
+            .select('worldview_id, name')
+            .eq('language_code', 'en');
+
+          const worldviewMap = new Map(worldviews?.map(w => [w.worldview_id, w.name]) || []);
+
+          const atomsBreakdown = Object.entries(grouped).map(([id, count]) => ({
+            worldview_id: id,
+            count: count as number,
+            name: worldviewMap.get(id) || id
+          })).sort((a, b) => b.count - a.count);
+
+          setAtomsByWorldview(atomsBreakdown);
+        }
+
       } catch (err: any) {
         setError(err.message);
       } finally {
@@ -89,6 +155,91 @@ export default function DashboardPage() {
             <CardContent><p className="text-3xl font-bold">{loading ? '...' : stats.total}</p></CardContent>
           </Card>
         </div>
+
+        {/* New Stats Row */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm text-muted-foreground">💡 Few-shot Példák</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-3xl font-bold">
+                {loading ? '...' : `${fewShotStats.active} / ${fewShotStats.total}`}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">aktív / összes</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm text-muted-foreground">🌍 Világnézetek</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-3xl font-bold">{loading ? '...' : worldviewCount}</p>
+              <p className="text-xs text-muted-foreground mt-1">aktív világnézet</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm text-muted-foreground">👤 Szerzők</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-3xl font-bold">{loading ? '...' : authorCount}</p>
+              <p className="text-xs text-muted-foreground mt-1">aktív szerző</p>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Atoms by Worldview Section */}
+        <Card className="mb-8">
+          <CardHeader>
+            <CardTitle>Atomok világnézet szerint</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {loading ? (
+              <p className="text-muted-foreground">Betöltés...</p>
+            ) : atomsByWorldview.length > 0 ? (
+              <div className="space-y-3">
+                {atomsByWorldview.map((item) => (
+                  <div key={item.worldview_id} className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+                    <span className="font-medium">{item.name}</span>
+                    <Badge variant="secondary">{item.count} atom</Badge>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-muted-foreground text-sm">Nincs adat</p>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Export Section */}
+        <Card className="mb-8">
+          <CardHeader>
+            <CardTitle>📥 Export</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap gap-4">
+              <a
+                href="/api/export?format=json"
+                download
+                className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium transition-colors"
+              >
+                📄 JSON Export
+              </a>
+              <a
+                href="/api/export?format=csv"
+                download
+                className="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white font-medium transition-colors"
+              >
+                📊 CSV Export
+              </a>
+            </div>
+            <p className="text-sm text-muted-foreground mt-4">
+              Exportáld a jóváhagyott atomokat JSON vagy CSV formátumban.
+            </p>
+          </CardContent>
+        </Card>
+        
         <Card>
           <CardHeader><CardTitle>{t('dashboard.recentActivity')}</CardTitle></CardHeader>
           <CardContent><p className="text-muted-foreground text-sm">{t('dashboard.noActivity')}</p></CardContent>

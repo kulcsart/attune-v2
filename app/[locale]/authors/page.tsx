@@ -4,7 +4,7 @@ import { Link } from '@/i18n/navigation';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -29,7 +29,8 @@ export default function AuthorsPage() {
     description_en: '',
     primary_worldview_id: '',
     secondary_worldviews: [] as WorldviewId[],
-    signature_concepts: '',
+    signature_concepts_hu: '',
+    signature_concepts_en: '',
     debranding_map: '',
     is_active: true
   });
@@ -37,25 +38,46 @@ export default function AuthorsPage() {
   async function fetchAuthors() {
     setLoading(true);
     
-    const { data, error } = await supabase
-      .from('authors')
-      .select(`
-        *,
-        author_translations!inner(display_name, description)
-      `)
-      .eq('author_translations.language_code', locale || 'hu')
-      .order('created_at', { ascending: false });
+    try {
+      // First, get all authors with ALL columns
+      const { data: authorsData, error: authorsError } = await supabase
+        .from('authors')
+        .select('*')
+        .order('created_at', { ascending: false });
 
-    if (!error && data) {
-      const transformed = data.map((item: any) => ({
-        ...item,
-        display_name: item.author_translations[0]?.display_name || 'Unknown',
-        description: item.author_translations[0]?.description || null,
-        author_translations: undefined
-      }));
-      setAuthors(transformed);
-    } else if (error) {
-      console.error('Error fetching authors:', error);
+      if (authorsError) {
+        console.error('Error fetching authors:', authorsError);
+        setLoading(false);
+        return;
+      }
+
+      if (!authorsData || authorsData.length === 0) {
+        setAuthors([]);
+        setLoading(false);
+        return;
+      }
+
+      // Then fetch translations for each author
+      const authorsWithTranslations = await Promise.all(
+        authorsData.map(async (author) => {
+          const { data: translation } = await supabase
+            .from('author_translations')
+            .select('display_name, description')
+            .eq('author_id', author.id)
+            .eq('language_code', locale || 'hu')
+            .single();
+
+          return {
+            ...author,
+            display_name: translation?.display_name || 'Unknown',
+            description: translation?.description || null
+          };
+        })
+      );
+
+      setAuthors(authorsWithTranslations);
+    } catch (err) {
+      console.error('Error in fetchAuthors:', err);
     }
     
     setLoading(false);
@@ -108,8 +130,9 @@ export default function AuthorsPage() {
       description_en: '',
       primary_worldview_id: '',
       secondary_worldviews: [],
-      signature_concepts: '',
-      debranding_map: '',
+      signature_concepts_hu: '',
+      signature_concepts_en: '',
+      debranding_map: '{"Pain Body": "fájdalomtest", "Now": "jelen pillanat"}',
       is_active: true
     });
     setIsDialogOpen(true);
@@ -117,17 +140,27 @@ export default function AuthorsPage() {
 
   function openEditDialog(author: AuthorWithTranslation) {
     setEditingAuthor(author);
-    setFormData({
-      display_name_hu: author.display_name || '',
-      display_name_en: '',
-      description_hu: author.description || '',
-      description_en: '',
-      primary_worldview_id: author.primary_worldview_id || '',
-      secondary_worldviews: Array.isArray(author.secondary_worldviews) ? author.secondary_worldviews : [],
-      signature_concepts: Array.isArray(author.signature_concepts) ? author.signature_concepts.join('\n') : '',
-      debranding_map: author.debranding_map ? JSON.stringify(author.debranding_map, null, 2) : '{}',
-      is_active: author.is_active
-    });
+    
+    // Fetch full author data including debranding_map from separate query
+    supabase
+      .from('authors')
+      .select('*')
+      .eq('id', author.id)
+      .single()
+      .then(({ data: fullAuthor }) => {
+        setFormData({
+          display_name_hu: author.display_name || '',
+          display_name_en: '',
+          description_hu: author.description || '',
+          description_en: '',
+          primary_worldview_id: fullAuthor?.primary_worldview_id || '',
+          secondary_worldviews: Array.isArray(fullAuthor?.secondary_worldviews) ? fullAuthor.secondary_worldviews : [],
+          signature_concepts_hu: Array.isArray(fullAuthor?.signature_concepts) ? fullAuthor.signature_concepts.join('\n') : '',
+          signature_concepts_en: '',
+          debranding_map: fullAuthor?.debranding_map ? JSON.stringify(fullAuthor.debranding_map, null, 2) : '{}',
+          is_active: fullAuthor?.is_active ?? true
+        });
+      });
     
     // Fetch EN translation
     supabase
@@ -150,12 +183,16 @@ export default function AuthorsPage() {
   }
 
   async function handleSave() {
-    const signatureConceptsArray = formData.signature_concepts.split('\n').filter(x => x.trim());
+    // Combine bilingual signature concepts
+    const conceptsHu = formData.signature_concepts_hu.split('\n').filter(x => x.trim());
+    const conceptsEn = formData.signature_concepts_en.split('\n').filter(x => x.trim());
+    const allConcepts = [...conceptsHu, ...conceptsEn].filter((v, i, a) => a.indexOf(v) === i); // dedupe
+    
     let debrandingMapObj = {};
     try {
-      debrandingMapObj = JSON.parse(formData.debranding_map);
-    } catch {
-      alert('Érvénytelen JSON formátum a debranding map-nél');
+      debrandingMapObj = JSON.parse(formData.debranding_map || '{}');
+    } catch (err) {
+      alert('Érvénytelen JSON formátum a debranding map-nél. Kell lennie objektum formátumban, pl: {"Pain Body": "fájdalomtest"}');
       return;
     }
 
@@ -166,7 +203,7 @@ export default function AuthorsPage() {
         .update({
           primary_worldview_id: formData.primary_worldview_id || null,
           secondary_worldviews: formData.secondary_worldviews,
-          signature_concepts: signatureConceptsArray,
+          signature_concepts: allConcepts,
           debranding_map: debrandingMapObj,
           is_active: formData.is_active
         })
@@ -198,7 +235,7 @@ export default function AuthorsPage() {
         .insert({
           primary_worldview_id: formData.primary_worldview_id || null,
           secondary_worldviews: formData.secondary_worldviews,
-          signature_concepts: signatureConceptsArray,
+          signature_concepts: allConcepts,
           debranding_map: debrandingMapObj,
           is_active: formData.is_active
         })
@@ -395,6 +432,11 @@ export default function AuthorsPage() {
             <DialogTitle>
               {editingAuthor ? 'Szerző szerkesztése' : 'Új szerző'}
             </DialogTitle>
+            <DialogDescription>
+              {editingAuthor 
+                ? 'Módosítsd a szerző adatait és világnézet-specifikus beállításait.' 
+                : 'Hozz létre egy új szerzőt kétnyelvű adatokkal és debranding szabályokkal.'}
+            </DialogDescription>
           </DialogHeader>
           
           <div className="grid gap-4 py-4">
@@ -474,26 +516,43 @@ export default function AuthorsPage() {
             </div>
 
             {/* Signature Concepts */}
-            <div className="grid gap-2">
-              <label className="text-sm font-medium">Jellemző fogalmak (soronként egy)</label>
-              <Textarea
-                value={formData.signature_concepts}
-                onChange={(e) => setFormData({ ...formData, signature_concepts: e.target.value })}
-                rows={4}
-                placeholder="jelenlét&#10;ego feloldása&#10;megfigyelő tudat"
-              />
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <label className="text-sm font-medium">Jellemző fogalmak (magyar)</label>
+                <Textarea
+                  value={formData.signature_concepts_hu}
+                  onChange={(e) => setFormData({ ...formData, signature_concepts_hu: e.target.value })}
+                  rows={4}
+                  placeholder="jelenlét&#10;ego feloldása&#10;megfigyelő tudat"
+                />
+              </div>
+              <div className="grid gap-2">
+                <label className="text-sm font-medium">Signature concepts (English)</label>
+                <Textarea
+                  value={formData.signature_concepts_en}
+                  onChange={(e) => setFormData({ ...formData, signature_concepts_en: e.target.value })}
+                  rows={4}
+                  placeholder="presence&#10;ego dissolution&#10;witness consciousness"
+                />
+              </div>
             </div>
 
             {/* Debranding Map */}
             <div className="grid gap-2">
-              <label className="text-sm font-medium">Debranding Map (JSON)</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-sm font-medium">Debranding Map (JSON)</label>
+                <span className="text-xs text-muted-foreground">A szerző márkaneveit általánosítja</span>
+              </div>
               <Textarea
                 value={formData.debranding_map}
                 onChange={(e) => setFormData({ ...formData, debranding_map: e.target.value })}
                 rows={6}
-                placeholder='{"Pain Body": "fájdalomtest", "Now": "jelen pillanat"}'
+                placeholder='{"Pain Body": "fájdalomtest", "Now": "jelen pillanat", "Ego": "én-tudat"}'
                 className="font-mono text-xs"
               />
+              <p className="text-xs text-muted-foreground mt-1">
+                💡 Példa: Eckhart Tolle "Pain Body" → "fájdalomtest". Az AI automatikusan helyettesíti ezeket a kifejezéseket az atomizálás során.
+              </p>
             </div>
 
             {/* Active */}
